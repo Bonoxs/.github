@@ -8,7 +8,7 @@ Join us on this thrilling journey!
 
 Your player 2. 🎮 The best experience in gift cards! ⚡ Official sponsor of @OLIMPOvlr
 
-[Visit our website](https://www.example.com)
+[Visit our website](https://www.bonoxs.com)
 
 
 Follow us on social media:
