@@ -1,7 +1,8 @@
 # Reusable workflow: blocks credentials outside AWS Secrets Manager (rule from Alex, 21-oct-2026).
-# Callers: every repo has .github/workflows/gitleaks.yml with
-#   jobs: { gitleaks: { uses: Bonoxs/.github/.github/workflows/gitleaks.yml@main } }
-# The job is named "gitleaks / gitleaks": make that the required status check (org ruleset).
+# Two ways to run it:
+#   1. Org ruleset with the "workflows" rule (required workflow): runs on every PR, no file needed in each repo (pull_request / merge_group below).
+#   2. A repo that the ruleset does not cover can call it:
+#        jobs: { gitleaks: { uses: Bonoxs/.github/.github/workflows/gitleaks.yml@main } }
 #
 # It scans only the NEW commits of the PR (or of the push), so history that was already in the repo does not block merges.
 # Findings that existed before this check are listed in .gitleaks-baseline.json at the root of each repo.
@@ -10,6 +11,8 @@ name: gitleaks
 
 on:
   workflow_call:
+  pull_request:
+  merge_group:
 
 permissions:
   contents: read
