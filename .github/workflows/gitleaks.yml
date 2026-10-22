@@ -1,0 +1,86 @@
+# Reusable workflow: blocks credentials outside AWS Secrets Manager (rule from Alex, 21-oct-2026).
+# Two ways to run it:
+#   1. Org ruleset with the "workflows" rule (required workflow): runs on every PR, no file needed in each repo (pull_request / merge_group below).
+#   2. A repo that the ruleset does not cover can call it:
+#        jobs: { gitleaks: { uses: Bonoxs/.github/.github/workflows/gitleaks.yml@main } }
+#
+# It scans only the NEW commits of the PR (or of the push), so history that was already in the repo does not block merges.
+# Findings that existed before this check are listed in .gitleaks-baseline.json at the root of each repo.
+# False positive: add "gitleaks:allow" in a comment on the same line, or the fingerprint to .gitleaksignore.
+name: gitleaks
+
+on:
+  workflow_call:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks 8.30.1 (pinned, checksum verified)
+        run: |
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+
+      - name: Write gitleaks config
+        run: |
+          cat > "$RUNNER_TEMP/gitleaks.toml" <<'TOML'
+          title = "Bonoxs gitleaks"
+
+          [extend]
+          useDefault = true
+
+          # Literal credential in a config file. Secrets must live in AWS Secrets Manager: a config file may only hold the secret NAME
+          # (tst/..., prod/...), a ${PLACEHOLDER} or an empty value.
+          [[rules]]
+          id = "bonoxs-config-literal-credential"
+          description = "Literal credential in a config file (use AWS Secrets Manager)"
+          regex = '''(?im)(?:^|[\s"'.\-_])(password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?key|token|client[_-]?secret|private[_-]?key|crt[_-]?pass)["']?[ \t]*[:=][ \t]*["']?([A-Za-z0-9/+_\-\.@#$%^&*!(){}\[\]~=]{8,})["']?[ \t]*$'''
+          path = '''(?i)\.(ya?ml|properties|env|conf|ini|toml|tf|tfvars)$|(^|/)\.env'''
+          secretGroup = 2
+          keywords = ["password", "passwd", "pwd", "secret", "key", "token", "pass"]
+
+          [[rules.allowlists]]
+          regexTarget = "secret"
+          regexes = [
+            '''^(\$\{|\{\{|#\{|<|tst/|prod/|test/|stg/|dev/|egb/|secretsmanager|https?://)''',
+            '''(?i)^(changeme|change-me|example|placeholder|your[-_]|xxxx|null|true|false|none|disabled|enabled)''',
+            '''^[a-z0-9_.\-]+(/[a-z0-9_.\-]+)+$''',
+          ]
+          TOML
+
+      - name: Scan new commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            RANGE="$PR_BASE..$PR_HEAD"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "${PUSH_BEFORE//0/}" ]; then
+            RANGE="$PUSH_BEFORE..$PUSH_AFTER"
+          else
+            RANGE="-1"
+          fi
+          BASELINE=()
+          if [ -f .gitleaks-baseline.json ]; then BASELINE=(--baseline-path .gitleaks-baseline.json); fi
+          if ! "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" "${BASELINE[@]}" --log-opts="$RANGE" --redact --no-banner -v .; then
+            echo "::error::Credential found outside AWS Secrets Manager. Move it to Secrets Manager (the config only keeps the secret name) and rotate it if it was pushed. False positive: add a gitleaks:allow comment on that line."
+            exit 1
+          fi
