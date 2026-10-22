@@ -60,6 +60,17 @@ jobs:
             '''(?i)^(changeme|change-me|example|placeholder|your[-_]|xxxx|null|true|false|none|disabled|enabled)''',
             '''^[a-z0-9_.\-]+(/[a-z0-9_.\-]+)+$''',
           ]
+
+          # False positives of the default generic-api-key rule (measured on 10 repos, 22-oct-2026):
+          # the NAME of a secret in Secrets Manager and the id of a KMS key are not credentials.
+          [[allowlists]]
+          description = "Secret names (tst/..., prod/...) and KMS key ids"
+          targetRules = ["generic-api-key"]
+          regexTarget = "line"
+          regexes = [
+            '''(?i)(credentials?|secrets?)[-_]?(secret|name|id|arn)?[\"']?[ \t]*[:=][ \t]*[\"']?(tst|prod|test|stg|dev|egb)/[A-Za-z0-9/_.\-]+[\"'`]?[ \t]*$''',
+            '''(?i)kms[-_]?key([-_]?id)?[\"']?[ \t]*[:=][ \t]*[\"']?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[\"']?[ \t]*$''',
+          ]
           TOML
 
       - name: Scan new commits
